@@ -82,7 +82,7 @@ $config['rest_auth'] = false;
 |	array('admin' => '1234')
 |
 */
-$config['rest_valid_logins'] = array('admin' => '1234');
+$config['rest_valid_logins'] = array();
 
 /*
 |--------------------------------------------------------------------------
@@ -107,7 +107,7 @@ $config['rest_database_group'] = 'default';
 |	'keys'
 |
 */
-$config['rest_keys_table'] = 'keys';
+$config['rest_keys_table'] = 'api_keys';
 
 /*
 |--------------------------------------------------------------------------
@@ -119,7 +119,7 @@ $config['rest_keys_table'] = 'keys';
 |
 |	FALSE
 
-	CREATE TABLE `keys` (
+	CREATE TABLE `api_keys` (
 	  `id` int(11) NOT NULL AUTO_INCREMENT,
 	  `key` varchar(40) NOT NULL,
 	  `level` int(2) NOT NULL,
@@ -156,6 +156,21 @@ $config['rest_key_length'] = 40;
 */
 $config['rest_key_name'] = 'X-API-KEY';
 
+
+/*
+|--------------------------------------------------------------------------
+| REST API HMAC Variables
+|--------------------------------------------------------------------------
+|
+| Which variable will provide details for the HMAC
+|
+*/
+$config['rest_enable_hmac'] = FALSE;
+$config['rest_hmac_name'] = 'X-API-CHECK';
+$config['rest_time_name'] = 'X-API-TIME';
+$config['rest_nonce_name'] = 'X-API-RAND';
+$config['rest_time_limit'] = '10 minutes'; // strtotime compatible string
+
 /*
 |--------------------------------------------------------------------------
 | REST API Logs Table Name
@@ -166,7 +181,7 @@ $config['rest_key_name'] = 'X-API-KEY';
 |	'logs'
 |
 */
-$config['rest_logs_table'] = 'logs';
+$config['rest_logs_table'] = 'api_logs';
 
 /*
 |--------------------------------------------------------------------------
@@ -179,7 +194,7 @@ $config['rest_logs_table'] = 'logs';
 |
 |	FALSE
 |
-	CREATE TABLE `logs` (
+	CREATE TABLE `api_logs` (
 	  `id` int(11) NOT NULL AUTO_INCREMENT,
 	  `uri` varchar(255) NOT NULL,
 	  `method` varchar(6) NOT NULL,
@@ -204,7 +219,7 @@ $config['rest_enable_logging'] = FALSE;
 |	'logs'
 |
 */
-$config['rest_limits_table'] = 'limits';
+$config['rest_limits_table'] = 'api_limits';
 
 /*
 |--------------------------------------------------------------------------
@@ -217,7 +232,7 @@ $config['rest_limits_table'] = 'limits';
 |
 |	FALSE
 |
-	CREATE TABLE `limits` (
+	CREATE TABLE `api_limits` (
 	  `id` int(11) NOT NULL AUTO_INCREMENT,
 	  `uri` varchar(255) NOT NULL,
 	  `count` int(10) NOT NULL,

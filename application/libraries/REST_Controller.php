@@ -7,6 +7,7 @@ class REST_Controller extends CI_Controller {
 	protected $request = NULL; // Stores accept, language, body, headers, etc
 	protected $response = NULL; // What is gonna happen in output?
 	protected $rest = NULL; // Stores DB, keys, key level, etc
+	protected $_raw_data_hash = NULL;
 	protected $_get_args = array();
 	protected $_post_args = array();
 	protected $_put_args = array();
@@ -55,7 +56,9 @@ class REST_Controller extends CI_Controller {
 		{
 			case 'get':
 				// Grab proper GET variables
-				parse_str(parse_url($_SERVER['REQUEST_URI'], PHP_URL_QUERY), $get);
+				$query = parse_url($_SERVER['REQUEST_URI'], PHP_URL_QUERY);
+				parse_str($query, $get);
+				if(config_item('rest_enable_hmac')) $this->_raw_data_hash = sha1($query);
 
 				// If there are any, populate $this->_get_args
 				empty($get) OR $this->_get_args = $get;
@@ -65,6 +68,7 @@ class REST_Controller extends CI_Controller {
 				$this->_post_args = $_POST;
 
 				$this->request->format and $this->request->body = file_get_contents('php://input');
+				$this->_raw_data_hash = sha1($this->request->body);
 				break;
 
 			case 'put':
@@ -72,19 +76,24 @@ class REST_Controller extends CI_Controller {
 				if ($this->request->format)
 				{
 					$this->request->body = file_get_contents('php://input');
+					if(config_item('rest_enable_hmac')) $this->_raw_data_hash = sha1($this->request->body);
 				}
 
 				// If no file type is provided, this is probably just arguments
 				else
 				{
-					parse_str(file_get_contents('php://input'), $this->_put_args);
+					$data = file_get_contents('php://input');
+					parse_str($data, $this->_put_args);
+					if(config_item('rest_enable_hmac')) $this->_raw_data_hash = sha1($data);
 				}
 				
 				break;
 
 			case 'delete':
 				// Set up out DELETE variables (which shouldn't really exist, but sssh!)
-				parse_str(file_get_contents('php://input'), $this->_delete_args);
+				$data = file_get_contents('php://input');
+				parse_str($data, $this->_delete_args);
+				if(config_item('rest_enable_hmac')) $this->_raw_data_hash = sha1($data);
 				break;
 		}
 
@@ -163,7 +172,7 @@ class REST_Controller extends CI_Controller {
 		// Get that useless shitty key out of here
 		if (config_item('rest_enable_keys') AND $use_key AND $this->_allow === FALSE)
 		{
-			$this->response(array('status' => false, 'error' => 'Invalid API Key.'), 403);
+			$this->response(array('status' => false, 'error' => isset($this->keyError)?$this->keyError:'Invalid API Key.'), 403);
 		}
 
 		// Sure it exists, but can they do anything with it?
@@ -330,7 +339,6 @@ class REST_Controller extends CI_Controller {
 					// If not HTML or XML assume its right and send it on its way
 					if ($format != 'html' AND $format != 'xml')
 					{
-
 						return $format;
 					}
 
@@ -406,14 +414,49 @@ class REST_Controller extends CI_Controller {
 		{
 			if ( ! $row = $this->rest->db->where('key', $key)->get(config_item('rest_keys_table'))->row())
 			{
+				$this->keyError = 'Invalid API Key';
 				return FALSE;
 			}
 
 			$this->rest->key = $row->key;
+			$this->rest->private_key = $row->private_key;
+			$this->rest->keyId = $row->id;
 			
 			isset($row->level) AND $this->rest->level = $row->level;
 			isset($row->ignore_limits) AND $this->rest->ignore_limits = $row->ignore_limits;
 
+			if(config_item('rest_enable_hmac'))
+			{
+				$hmac_name = 'HTTP_' . strtoupper(str_replace('-', '_', config_item('rest_hmac_name')));
+				$time_name = 'HTTP_' . strtoupper(str_replace('-', '_', config_item('rest_time_name')));
+				$nonce_name = 'HTTP_' . strtoupper(str_replace('-', '_', config_item('rest_nonce_name')));
+				$time_limit = config_item('rest_time_limit');
+				
+				// Make sure the request included a timestamp within the +- window of the time limit
+				$timestamp = (int)$this->input->server($time_name);
+				if($timestamp < strtotime('-'.$time_limit) || $timestamp > strtotime($time_limit))
+				{
+					$this->keyError = 'Request has expired';
+					return FALSE;	
+				}
+				
+				// Make sure the hmac check is correct
+				$stringTohash = sha1($this->rest->key) . $this->input->server($time_name) . $this->input->server($nonce_name) . $this->_raw_data_hash;
+				$this->rest->hmac_hash = hash_hmac('sha1',$stringTohash,$this->rest->private_key);
+				if(base64_decode($this->input->server($hmac_name)) != $this->rest->hmac_hash)
+				{
+					$this->keyError = 'Invalid Authorization Data';
+					return FALSE;
+				}
+				
+				// Every request should be unique (if logging is enabled)
+				if ( $row = $this->rest->db->where('hmac_hash', $this->rest->hmac_hash)->get(config_item('rest_logs_table'),1)->row() )
+				{
+					$this->keyError = 'Duplicate Transaction';
+					return FALSE;
+				}
+				
+			}
 			return TRUE;
 		}
 
@@ -468,6 +511,7 @@ class REST_Controller extends CI_Controller {
 			'method' => $this->request->method,
 			'params' => serialize($this->_args),
 			'api_key' => isset($this->rest->key) ? $this->rest->key : '',
+			'hmac_hash' => isset($this->rest->hmac_hash) ? $this->rest->hmac_hash : '',
 			'ip_address' => $this->input->ip_address(),
 			'time' => function_exists('now') ? now() : time(),
 			'authorized' => $authorized
